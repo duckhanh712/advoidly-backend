@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+.yarn-cache/
+
+# build output
+dist/
+coverage/
+*.tsbuildinfo
+
+# environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+service-account*.json
+firebase-*.json
+
+# logs & OS
+*.log
+.DS_Store
+
+# editors
+.idea/
+.vscode/*
+!.vscode/extensions.json

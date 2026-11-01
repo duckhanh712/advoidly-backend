@@ -1,0 +1,394 @@
+// Urban Alert Platform — database schema
+//
+// One PostgreSQL instance, one PostgreSQL *schema* per service. Each service connects with
+// its own database role that is only granted privileges on its own schema
+// (see infrastructure/postgres/init/01-roles-and-schemas.sh). There are deliberately NO
+// foreign keys across schemas: services reference each other's entities by id only.
+//
+// Geospatial columns (`location`) are PostGIS `geography(Point,4326)` values kept in sync with
+// the `latitude`/`longitude` columns by database triggers. Prisma does not support PostGIS types
+// natively, so they are declared `Unsupported(...)` and are only used through `$queryRaw`. The
+// triggers live in the migration SQL (Prisma cannot express them). See docs/database/database-design.md.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Used by the Prisma CLI only (migrations, seed). Services connect with their own roles.
+  url      = env("MIGRATION_DATABASE_URL")
+  schemas  = ["auth", "users", "incidents", "moderation", "notifications"]
+}
+
+// =============================================================================
+// auth — owned by auth-service
+// =============================================================================
+
+enum UserRole {
+  USER
+  MODERATOR
+  ADMIN
+
+  @@schema("auth")
+}
+
+/// Identity and credentials. Profile data lives in users.profiles (user-service).
+model User {
+  id            String         @id @default(uuid()) @db.Uuid
+  /// Stored lower-cased.
+  email         String         @unique @db.VarChar(320)
+  passwordHash  String         @map("password_hash")
+  role          UserRole       @default(USER)
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+  @@schema("auth")
+}
+
+/// Refresh tokens are opaque random strings; only their SHA-256 hash is stored.
+/// Tokens issued by rotation share a `familyId`, so reuse of a rotated token revokes the family.
+model RefreshToken {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  familyId     String    @map("family_id") @db.Uuid
+  tokenHash    String    @unique @map("token_hash") @db.Char(64)
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(3)
+  replacedById String?   @map("replaced_by_id") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+  @@schema("auth")
+}
+
+// =============================================================================
+// users — owned by user-service
+// =============================================================================
+
+/// `id` equals the auth user id (no cross-schema FK). Created from the `user.registered` event.
+model UserProfile {
+  id                     String                  @id @db.Uuid
+  email                  String                  @db.VarChar(320)
+  displayName            String                  @map("display_name") @db.VarChar(100)
+  avatarUrl              String?                 @map("avatar_url") @db.VarChar(2048)
+  locale                 String                  @default("vi") @db.VarChar(10)
+  createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+  savedAreas             SavedArea[]
+  notificationPreference NotificationPreference?
+
+  @@map("profiles")
+  @@schema("users")
+}
+
+/// A circular area a user follows for alerts.
+model SavedArea {
+  id           String                                @id @default(uuid()) @db.Uuid
+  userId       String                                @map("user_id") @db.Uuid
+  name         String                                @db.VarChar(100)
+  latitude     Float
+  longitude    Float
+  /// Set by a trigger from latitude/longitude (see migration). Never written by the app.
+  location     Unsupported("geography(Point,4326)")?
+  radiusMeters Int                                   @map("radius_meters")
+  createdAt    DateTime                              @default(now()) @map("created_at") @db.Timestamptz(3)
+  user         UserProfile                           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([location], type: Gist)
+  @@map("saved_areas")
+  @@schema("users")
+}
+
+model NotificationPreference {
+  userId          String      @id @map("user_id") @db.Uuid
+  pushEnabled     Boolean     @default(true) @map("push_enabled")
+  /// Incident types the user wants alerts for. Empty array means all types.
+  incidentTypes   String[]    @default([]) @map("incident_types")
+  /// Local hour (0-23, Asia/Ho_Chi_Minh) when quiet hours start/end; both null = disabled.
+  quietHoursStart Int?        @map("quiet_hours_start") @db.SmallInt
+  quietHoursEnd   Int?        @map("quiet_hours_end") @db.SmallInt
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  user            UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+  @@schema("users")
+}
+
+/// Idempotency log for Kafka events consumed by user-service.
+model UserProcessedEvent {
+  eventId     String   @id @map("event_id") @db.Uuid
+  eventType   String   @map("event_type") @db.VarChar(100)
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(3)
+
+  @@map("processed_events")
+  @@schema("users")
+}
+
+// =============================================================================
+// incidents — owned by incident-service
+// =============================================================================
+
+enum IncidentType {
+  ACCIDENT
+  TRAFFIC_JAM
+  FLOODING
+  ROAD_CLOSURE
+  CONSTRUCTION
+  OTHER
+
+  @@schema("incidents")
+}
+
+enum IncidentStatus {
+  PENDING
+  VERIFIED
+  ACTIVE
+  RESOLVED
+  REJECTED
+
+  @@schema("incidents")
+}
+
+enum IncidentReportStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+
+  @@schema("incidents")
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+
+  @@schema("incidents")
+}
+
+enum IncidentHistoryAction {
+  CREATED
+  UPDATED
+  STATUS_CHANGED
+
+  @@schema("incidents")
+}
+
+model Incident {
+  id          String                                @id @default(uuid()) @db.Uuid
+  reporterId  String                                @map("reporter_id") @db.Uuid
+  type        IncidentType
+  title       String                                @db.VarChar(150)
+  description String?
+  latitude    Float
+  longitude   Float
+  /// Set by a trigger from latitude/longitude (see migration). Never written by the app.
+  location    Unsupported("geography(Point,4326)")?
+  status      IncidentStatus                        @default(PENDING)
+  occurredAt  DateTime                              @map("occurred_at") @db.Timestamptz(3)
+  createdAt   DateTime                              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime                              @updatedAt @map("updated_at") @db.Timestamptz(3)
+  reports     IncidentReport[]
+  media       IncidentMedia[]
+  history     IncidentHistory[]
+
+  @@index([status, occurredAt(sort: Desc)])
+  @@index([reporterId, createdAt(sort: Desc)])
+  @@index([location], type: Gist)
+  @@map("incidents")
+  @@schema("incidents")
+}
+
+/// A user's report about an incident: the original report or a later confirmation/update.
+model IncidentReport {
+  id          String               @id @default(uuid()) @db.Uuid
+  incidentId  String               @map("incident_id") @db.Uuid
+  reporterId  String               @map("reporter_id") @db.Uuid
+  description String?
+  status      IncidentReportStatus @default(PENDING)
+  createdAt   DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+  incident    Incident             @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId])
+  @@index([reporterId])
+  @@map("incident_reports")
+  @@schema("incidents")
+}
+
+model IncidentMedia {
+  id         String    @id @default(uuid()) @db.Uuid
+  incidentId String    @map("incident_id") @db.Uuid
+  mediaUrl   String    @map("media_url") @db.VarChar(2048)
+  mediaType  MediaType @map("media_type")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  incident   Incident  @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId])
+  @@map("incident_media")
+  @@schema("incidents")
+}
+
+/// Append-only audit trail of incident changes.
+model IncidentHistory {
+  id             String                @id @default(uuid()) @db.Uuid
+  incidentId     String                @map("incident_id") @db.Uuid
+  actorId        String                @map("actor_id") @db.Uuid
+  action         IncidentHistoryAction
+  previousStatus IncidentStatus?       @map("previous_status")
+  newStatus      IncidentStatus?       @map("new_status")
+  metadata       Json?
+  createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  incident       Incident              @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId, createdAt])
+  @@map("incident_history")
+  @@schema("incidents")
+}
+
+// =============================================================================
+// moderation — owned by moderation-service
+// =============================================================================
+
+enum ModerationCaseStatus {
+  OPEN
+  INFO_REQUESTED
+  APPROVED
+  REJECTED
+
+  @@schema("moderation")
+}
+
+enum ModerationActionType {
+  APPROVE
+  REJECT
+  REQUEST_INFO
+
+  @@schema("moderation")
+}
+
+/// Review case created from `incident.created`. Holds a copy of the incident data needed for
+/// review and duplicate detection, so moderation never reads the incidents schema.
+model ModerationCase {
+  id                   String                                @id @default(uuid()) @db.Uuid
+  incidentId           String                                @unique @map("incident_id") @db.Uuid
+  reporterId           String                                @map("reporter_id") @db.Uuid
+  /// Copy of the incident type (validated against the shared IncidentType enum).
+  incidentType         String                                @map("incident_type") @db.VarChar(32)
+  title                String                                @db.VarChar(150)
+  description          String?
+  latitude             Float
+  longitude            Float
+  /// Set by a trigger from latitude/longitude (see migration). Never written by the app.
+  location             Unsupported("geography(Point,4326)")?
+  status               ModerationCaseStatus                  @default(OPEN)
+  /// Incident ids of earlier cases flagged as potential duplicates at intake.
+  possibleDuplicateIds String[]                              @default([]) @map("possible_duplicate_ids") @db.Uuid
+  occurredAt           DateTime                              @map("occurred_at") @db.Timestamptz(3)
+  createdAt            DateTime                              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime                              @updatedAt @map("updated_at") @db.Timestamptz(3)
+  actions              ModerationAction[]
+
+  @@index([status, createdAt])
+  @@index([incidentType, occurredAt])
+  @@index([location], type: Gist)
+  @@map("cases")
+  @@schema("moderation")
+}
+
+/// Append-only log of every moderation action.
+model ModerationAction {
+  id          String               @id @default(uuid()) @db.Uuid
+  caseId      String               @map("case_id") @db.Uuid
+  moderatorId String               @map("moderator_id") @db.Uuid
+  action      ModerationActionType
+  reason      String?
+  metadata    Json?
+  createdAt   DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  case        ModerationCase       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, createdAt])
+  @@map("actions")
+  @@schema("moderation")
+}
+
+model ModerationProcessedEvent {
+  eventId     String   @id @map("event_id") @db.Uuid
+  eventType   String   @map("event_type") @db.VarChar(100)
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(3)
+
+  @@map("processed_events")
+  @@schema("moderation")
+}
+
+// =============================================================================
+// notifications — owned by notification-service
+// =============================================================================
+
+enum NotificationType {
+  INCIDENT_NEARBY
+  REPORT_VERIFIED
+  REPORT_REJECTED
+  REPORT_RESOLVED
+  MODERATION_INFO_REQUESTED
+  SYSTEM
+
+  @@schema("notifications")
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  /// No push was attempted (push disabled, quiet hours or no registered device).
+  SKIPPED
+
+  @@schema("notifications")
+}
+
+model Notification {
+  id        String             @id @default(uuid()) @db.Uuid
+  userId    String             @map("user_id") @db.Uuid
+  type      NotificationType
+  title     String             @db.VarChar(200)
+  body      String
+  data      Json?
+  status    NotificationStatus @default(PENDING)
+  /// Prevents duplicate notifications for the same user and cause under at-least-once delivery.
+  dedupeKey String?            @map("dedupe_key") @db.VarChar(200)
+  readAt    DateTime?          @map("read_at") @db.Timestamptz(3)
+  sentAt    DateTime?          @map("sent_at") @db.Timestamptz(3)
+  createdAt DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("notifications")
+  @@schema("notifications")
+}
+
+model DeviceToken {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  token      String   @unique @db.VarChar(512)
+  platform   String   @db.VarChar(16)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+
+  @@index([userId])
+  @@map("device_tokens")
+  @@schema("notifications")
+}
+
+model NotificationProcessedEvent {
+  eventId     String   @id @map("event_id") @db.Uuid
+  eventType   String   @map("event_type") @db.VarChar(100)
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(3)
+
+  @@map("processed_events")
+  @@schema("notifications")
+}

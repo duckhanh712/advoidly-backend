@@ -1,0 +1,562 @@
+{
+  "info": {
+    "name": "Urban Alert – Luồng chính",
+    "description": "Báo sự cố → kiểm duyệt → cảnh báo, qua API Gateway.\n\nYêu cầu: `yarn dev` đang chạy và database đã seed (`yarn prisma:seed`).\n\nChạy cả thư mục bằng Collection Runner để các bước tự đợi và thử lại khi chờ Kafka. Có thể chạy lại nhiều lần: mỗi lần tạo một người dùng Bình mới và một sự cố mới.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "0. Kiểm tra các service",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{gatewayUrl}}/health/services",
+        "description": "Gateway hỏi readiness của 5 service phía sau. Tất cả phải là `up` trước khi chạy luồng."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Gateway trả 200', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('Cả 5 service đều up', () => pm.expect(body.status, JSON.stringify(body.services)).to.eql('ok'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Bình đăng ký tài khoản",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/auth/register",
+        "description": "Tạo người dùng mới (Bình) với email ngẫu nhiên để chạy lại được nhiều lần.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{binhEmail}}\",\n  \"password\": \"{{password}}\",\n  \"displayName\": \"Trần Bình\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('binhEmail', `binh${Date.now()}@test.local`);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201 Created', () => pm.response.to.have.status(201));",
+              "const data = pm.response.json().data;",
+              "pm.test('Role mặc định là USER', () => pm.expect(data.user.role).to.eql('USER'));",
+              "pm.collectionVariables.set('binhToken', data.tokens.accessToken);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Bình theo dõi khu vực Hồ Gươm",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{binhToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/users/me/saved-areas",
+        "description": "Khu vực tròn bán kính 2 km quanh Hồ Gươm. Sự cố được duyệt trong vùng này sẽ cảnh báo Bình.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Hồ Gươm\",\n  \"latitude\": 21.0287,\n  \"longitude\": 105.8524,\n  \"radiusMeters\": 2000\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201 Created', () => pm.response.to.have.status(201));",
+              "pm.test('Bán kính 2000 m', () => pm.expect(pm.response.json().data.radiusMeters).to.eql(2000));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Bình đăng ký thiết bị nhận push",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{binhToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/notifications/devices",
+        "description": "Token FCM giả. Với provider mock, log notification-service sẽ in `[mock push]`.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"token\": \"demo-fcm-token-binh-123\",\n  \"platform\": \"ANDROID\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('204 No Content', () => pm.response.to.have.status(204));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. An đăng nhập",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/auth/login",
+        "description": "An là tài khoản seed `user@urbanalert.local`.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"user@urbanalert.local\",\n  \"password\": \"{{password}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set('anToken', pm.response.json().data.tokens.accessToken);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. An báo sự cố ngập",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{anToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/incidents",
+        "description": "Sự cố mới luôn ở trạng thái PENDING. incident-service phát sự kiện `incident.created`.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"FLOODING\",\n  \"title\": \"Ngập sâu phố Hàng Bài\",\n  \"description\": \"Nước ngập 30cm\",\n  \"latitude\": 21.0245,\n  \"longitude\": 105.853\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201 Created', () => pm.response.to.have.status(201));",
+              "const data = pm.response.json().data;",
+              "pm.test('Trạng thái PENDING', () => pm.expect(data.status).to.eql('PENDING'));",
+              "pm.collectionVariables.set('incidentId', data.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Khách xem sự cố đang chờ duyệt (phải bị ẩn)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/incidents/{{incidentId}}",
+        "description": "Không gửi token. Sự cố PENDING bị ẩn với khách nên phải trả 404."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('404 vì sự cố PENDING bị ẩn với khách', () => pm.response.to.have.status(404));",
+              "pm.test('Mã lỗi RESOURCE_NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('RESOURCE_NOT_FOUND'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Moderator đăng nhập",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/auth/login",
+        "description": "Tài khoản seed `moderator@urbanalert.local`.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"moderator@urbanalert.local\",\n  \"password\": \"{{password}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('Role MODERATOR', () => pm.expect(pm.response.json().data.user.role).to.eql('MODERATOR'));",
+              "pm.collectionVariables.set('modToken', pm.response.json().data.tokens.accessToken);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Moderator tìm báo cáo trong hàng chờ",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{modToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/moderation/reports?limit=100",
+        "description": "moderation-service tạo case khi nhận `incident.created`. Request tự thử lại tối đa 5 lần nếu case chưa có."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Đợi Kafka chuyển sự kiện sang service khác.",
+              "setTimeout(() => {}, 2000);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "const found = (body.data || []).find(c => c.incidentId === pm.collectionVariables.get('incidentId'));",
+              "const retries = Number(pm.collectionVariables.get('retries') || 0);",
+              "if (!found && retries < 5) {",
+              "  pm.collectionVariables.set('retries', retries + 1);",
+              "  postman.setNextRequest(pm.info.requestName); // chưa có kết quả, thử lại (chỉ trong Collection Runner)",
+              "} else {",
+              "  pm.collectionVariables.set('retries', 0);",
+              "  pm.test('Case kiểm duyệt đã được tạo từ incident.created', () => pm.expect(found, 'chưa thấy kết quả sau 5 lần thử').to.be.ok);",
+              "  pm.collectionVariables.set('caseId', found.id);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Moderator duyệt báo cáo",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{modToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/moderation/reports/{{caseId}}/approve",
+        "description": "Sự cố chuyển sang VERIFIED và incident-service phát `incident.verified`.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"note\": \"Đã xác minh qua camera\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const data = pm.response.json().data;",
+              "pm.test('Case APPROVED', () => pm.expect(data.status).to.eql('APPROVED'));",
+              "pm.test('Có ghi lại thao tác APPROVE', () => pm.expect(data.actions.map(a => a.action)).to.include('APPROVE'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Khách thấy sự cố trên bản đồ gần đó",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/incidents/nearby?latitude=21.0285&longitude=105.8542&radiusMeters=1000",
+        "description": "Sau khi duyệt, sự cố hiện công khai. Kết quả xếp theo khoảng cách và có `distanceMeters`."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const item = pm.response.json().data.find(i => i.id === pm.collectionVariables.get('incidentId'));",
+              "pm.test('Sự cố có trong kết quả, trạng thái VERIFIED', () => {",
+              "  pm.expect(item, 'không thấy sự cố').to.be.ok;",
+              "  pm.expect(item.status).to.eql('VERIFIED');",
+              "});",
+              "pm.test('Cách tâm khoảng 450–480 m', () => pm.expect(item.distanceMeters).to.be.within(400, 520));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. An nhận thông báo đã xác minh",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{anToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/notifications",
+        "description": "notification-service nhận `incident.verified` và báo cho người báo cáo. Tự thử lại tối đa 5 lần."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Đợi Kafka chuyển sự kiện sang service khác.",
+              "setTimeout(() => {}, 2000);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "const found = (body.data || []).find(n => n.type === 'REPORT_VERIFIED' && n.data && n.data.incidentId === pm.collectionVariables.get('incidentId'));",
+              "const retries = Number(pm.collectionVariables.get('retries') || 0);",
+              "if (!found && retries < 5) {",
+              "  pm.collectionVariables.set('retries', retries + 1);",
+              "  postman.setNextRequest(pm.info.requestName); // chưa có kết quả, thử lại (chỉ trong Collection Runner)",
+              "} else {",
+              "  pm.collectionVariables.set('retries', 0);",
+              "  pm.test('An có thông báo REPORT_VERIFIED cho sự cố này', () => pm.expect(found, 'chưa thấy kết quả sau 5 lần thử').to.be.ok);",
+              "  pm.test('Tiêu đề đúng', () => pm.expect(found.title).to.eql('Báo cáo của bạn đã được xác minh'));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12. Bình nhận cảnh báo sự cố gần khu vực theo dõi",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{binhToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/notifications",
+        "description": "user-service tìm ra Bình vì sự cố nằm trong khu vực Hồ Gươm. Tự thử lại tối đa 5 lần."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Đợi Kafka chuyển sự kiện sang service khác.",
+              "setTimeout(() => {}, 2000);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "const found = (body.data || []).find(n => n.type === 'INCIDENT_NEARBY' && n.data && n.data.incidentId === pm.collectionVariables.get('incidentId'));",
+              "const retries = Number(pm.collectionVariables.get('retries') || 0);",
+              "if (!found && retries < 5) {",
+              "  pm.collectionVariables.set('retries', retries + 1);",
+              "  postman.setNextRequest(pm.info.requestName); // chưa có kết quả, thử lại (chỉ trong Collection Runner)",
+              "} else {",
+              "  pm.collectionVariables.set('retries', 0);",
+              "  pm.test('Bình có cảnh báo INCIDENT_NEARBY cho sự cố này', () => pm.expect(found, 'chưa thấy kết quả sau 5 lần thử').to.be.ok);",
+              "  pm.test('Tiêu đề nhắc khu vực Hồ Gươm', () => pm.expect(found.title).to.include('Hồ Gươm'));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13. An xem lịch sử sự cố",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{anToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/incidents/{{incidentId}}/history",
+        "description": "Lịch sử phải có CREATED rồi STATUS_CHANGED (PENDING → VERIFIED)."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const history = pm.response.json().data;",
+              "pm.test('CREATED rồi STATUS_CHANGED', () => pm.expect(history.map(h => h.action)).to.eql(['CREATED', 'STATUS_CHANGED']));",
+              "pm.test('PENDING → VERIFIED', () => {",
+              "  pm.expect(history[1].previousStatus).to.eql('PENDING');",
+              "  pm.expect(history[1].newStatus).to.eql('VERIFIED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "gatewayUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000/api/v1"
+    },
+    {
+      "key": "password",
+      "value": "Password123"
+    },
+    {
+      "key": "binhEmail",
+      "value": ""
+    },
+    {
+      "key": "binhToken",
+      "value": ""
+    },
+    {
+      "key": "anToken",
+      "value": ""
+    },
+    {
+      "key": "modToken",
+      "value": ""
+    },
+    {
+      "key": "incidentId",
+      "value": ""
+    },
+    {
+      "key": "caseId",
+      "value": ""
+    },
+    {
+      "key": "retries",
+      "value": "0"
+    }
+  ]
+}

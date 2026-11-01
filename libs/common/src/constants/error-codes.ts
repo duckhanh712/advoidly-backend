@@ -1,0 +1,15 @@
+/** Stable error codes returned in `error.code`. Clients may rely on these values. */
+export const ErrorCodes = {
+  VALIDATION_FAILED: 'VALIDATION_FAILED',
+  UNAUTHORIZED: 'UNAUTHORIZED',
+  FORBIDDEN: 'FORBIDDEN',
+  RESOURCE_NOT_FOUND: 'RESOURCE_NOT_FOUND',
+  CONFLICT: 'CONFLICT',
+  INVALID_STATE_TRANSITION: 'INVALID_STATE_TRANSITION',
+  RATE_LIMITED: 'RATE_LIMITED',
+  DOWNSTREAM_SERVICE_ERROR: 'DOWNSTREAM_SERVICE_ERROR',
+  SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+} as const;
+
+export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes] | (string & {});

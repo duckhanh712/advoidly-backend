@@ -1,0 +1,11 @@
+# Kafka topics created by create-topics.sh. One topic per event type (see
+# libs/contracts/src/events/event-types.ts); each gets a `<topic>.dlt` dead-letter topic.
+# A unit test (libs/contracts/src/events/topics.spec.ts) keeps this list in sync.
+incident.created
+incident.verified
+incident.updated
+incident.resolved
+incident.rejected
+notification.requested
+user.registered
+user.updated

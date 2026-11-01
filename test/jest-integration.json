@@ -1,0 +1,13 @@
+{
+  "rootDir": "..",
+  "roots": ["<rootDir>/test/integration"],
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "testRegex": "\\.int-spec\\.ts$",
+  "transform": { "^.+\\.ts$": ["ts-jest", { "tsconfig": "<rootDir>/tsconfig.json" }] },
+  "moduleNameMapper": {
+    "^@app/(common|config|contracts|database|kafka|observability|redis)(/.*)?$": "<rootDir>/libs/$1/src$2"
+  },
+  "setupFiles": ["<rootDir>/test/integration/setup-env.ts"],
+  "testEnvironment": "node",
+  "testTimeout": 30000
+}
