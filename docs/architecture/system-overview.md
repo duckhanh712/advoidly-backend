@@ -83,7 +83,7 @@ Used only when the caller needs an immediate answer:
 |---|---|---|---|
 | moderation | incident | `POST /internal/incidents/:id/transitions` | The moderator needs to know the decision was applied. Incident-service owns the state. |
 | notification | user | `GET /internal/alert-recipients` | Needs the current saved areas and preferences to fan out an alert. |
-| notification | user | `GET /internal/users/:id/notification-preferences` | Read-through for `GET /notifications/preferences`. |
+| notification | user | `GET /internal/users/:id/notification-preferences` | Not called at the moment. Kept for checking preferences on direct notifications (TODO 5.5). |
 
 Internal routes sit outside the `/api/v1` prefix, are excluded from Swagger, require the shared
 `x-internal-api-key` header (compared in constant time), and are never routed by the gateway. The

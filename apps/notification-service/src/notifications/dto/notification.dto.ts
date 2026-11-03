@@ -2,7 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsIn, IsOptional, IsString, Length } from 'class-validator';
 import { PaginationQueryDto } from '@app/common';
-import { IncidentType, NotificationType } from '@app/contracts';
+import { NotificationType } from '@app/contracts';
 
 export class ListNotificationsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({ default: false })
@@ -37,11 +37,4 @@ export class NotificationDto {
 
 export class ReadAllResultDto {
   @ApiProperty() updated: number;
-}
-
-export class NotificationPreferencesDto {
-  @ApiProperty() pushEnabled: boolean;
-  @ApiProperty({ enum: IncidentType, isArray: true }) incidentTypes: IncidentType[];
-  @ApiPropertyOptional({ nullable: true, type: Number }) quietHoursStart: number | null;
-  @ApiPropertyOptional({ nullable: true, type: Number }) quietHoursEnd: number | null;
 }

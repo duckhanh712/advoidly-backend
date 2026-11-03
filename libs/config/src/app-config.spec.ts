@@ -26,6 +26,7 @@ describe('buildAppConfig', () => {
     expect(config.port).toBe(3001);
     expect(config.databaseUrl).toBe('postgresql://db');
     expect(config.jwt.accessTtlSeconds).toBe(900);
+    expect(config.incident.endReportsToResolve).toBe(3);
     expect(config.fcm).toBeUndefined();
   });
 

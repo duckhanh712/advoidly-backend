@@ -25,6 +25,7 @@ describe('gateway routing', () => {
     ['GET', '/api/v1/incidents'],
     ['GET', '/api/v1/incidents/nearby'],
     ['GET', '/api/v1/incidents/2f1c6e0a-8f0e-4a8e-9a55-0d4d1b2c3e4f'],
+    ['GET', '/api/v1/incidents/2f1c6e0a-8f0e-4a8e-9a55-0d4d1b2c3e4f/reports'],
     ['OPTIONS', '/api/v1/users/me'],
   ])('%s %s is public', (method, path) => expect(isPublicRoute(method, path)).toBe(true));
 
@@ -34,6 +35,8 @@ describe('gateway routing', () => {
     ['POST', '/api/v1/incidents'],
     ['PATCH', '/api/v1/incidents/2f1c6e0a-8f0e-4a8e-9a55-0d4d1b2c3e4f'],
     ['GET', '/api/v1/incidents/2f1c6e0a-8f0e-4a8e-9a55-0d4d1b2c3e4f/history'],
+    ['POST', '/api/v1/incidents/2f1c6e0a-8f0e-4a8e-9a55-0d4d1b2c3e4f/reports'],
+    ['POST', '/api/v1/incidents/2f1c6e0a-8f0e-4a8e-9a55-0d4d1b2c3e4f/end-reports'],
     ['GET', '/api/v1/users/me'],
     ['GET', '/api/v1/moderation/reports'],
     ['GET', '/api/v1/notifications'],

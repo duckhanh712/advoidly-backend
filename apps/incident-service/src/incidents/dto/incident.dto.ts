@@ -26,6 +26,15 @@ export class IncidentDto {
   @ApiPropertyOptional({ type: [IncidentMediaDto] }) media?: IncidentMediaDto[];
   @ApiPropertyOptional({ description: 'Distance from the query point (nearby search only)' })
   distanceMeters?: number;
+  @ApiPropertyOptional({
+    description:
+      'Number of people other than the reporter who confirmed the incident (detail endpoint only)',
+  })
+  confirmationCount?: number;
+  @ApiPropertyOptional({
+    description: 'Number of people who reported the incident as ended (detail endpoint only)',
+  })
+  endReportCount?: number;
 }
 
 export class IncidentHistoryDto {

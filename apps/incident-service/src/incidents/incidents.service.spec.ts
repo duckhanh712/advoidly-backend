@@ -69,6 +69,7 @@ describe('IncidentsService.transition', () => {
   it.each([
     [IncidentStatus.PENDING, IncidentStatus.VERIFIED, EventTypes.INCIDENT_VERIFIED],
     [IncidentStatus.VERIFIED, IncidentStatus.ACTIVE, EventTypes.INCIDENT_UPDATED],
+    [IncidentStatus.VERIFIED, IncidentStatus.RESOLVED, EventTypes.INCIDENT_RESOLVED],
     [IncidentStatus.ACTIVE, IncidentStatus.RESOLVED, EventTypes.INCIDENT_RESOLVED],
   ])('%s → %s records history, clears cache and publishes %s', async (from, to, eventType) => {
     const { service, tx, events, cache } = setup(from);
@@ -151,5 +152,60 @@ describe('IncidentsService.transition', () => {
     await expect(service.transition(command(IncidentStatus.VERIFIED))).resolves.toMatchObject({
       status: IncidentStatus.VERIFIED,
     });
+  });
+});
+
+describe('IncidentsService.findOne', () => {
+  function setupFindOne(cached?: object) {
+    const row = { ...incident(IncidentStatus.ACTIVE), media: [] };
+    const prisma = {
+      incident: { findUnique: jest.fn().mockResolvedValue(row) },
+      incidentReport: { count: jest.fn().mockResolvedValue(12) },
+      incidentEndReport: { count: jest.fn().mockResolvedValue(2) },
+    };
+    const cache = {
+      getJson: jest.fn().mockResolvedValue(cached),
+      setJson: jest.fn(),
+      delete: jest.fn(),
+    };
+    const service = new IncidentsService(
+      prisma as unknown as PrismaService,
+      {} as IncidentsRepository,
+      cache as unknown as CacheService,
+      { publish: jest.fn() } as unknown as EventPublisher,
+      config,
+    );
+    return { service, prisma, cache };
+  }
+
+  it('includes confirmationCount (accepted reports by people other than the reporter) and endReportCount', async () => {
+    const { service, prisma, cache } = setupFindOne();
+
+    const result = await service.findOne('inc-1');
+
+    expect(result.confirmationCount).toBe(12);
+    expect(result.endReportCount).toBe(2);
+    expect(prisma.incidentEndReport.count).toHaveBeenCalledWith({ where: { incidentId: 'inc-1' } });
+    expect(prisma.incidentReport.count).toHaveBeenCalledWith({
+      where: { incidentId: 'inc-1', status: 'ACCEPTED', reporterId: { not: 'reporter-1' } },
+    });
+    expect(cache.setJson).toHaveBeenCalledWith(
+      'incident:inc-1',
+      expect.objectContaining({ confirmationCount: 12, endReportCount: 2 }),
+      config.incident.cacheTtlSeconds,
+    );
+  });
+
+  it('serves the cached detail without counting again', async () => {
+    const cached = {
+      id: 'inc-1',
+      reporterId: 'reporter-1',
+      status: 'ACTIVE',
+      confirmationCount: 3,
+    };
+    const { service, prisma } = setupFindOne(cached);
+
+    await expect(service.findOne('inc-1')).resolves.toMatchObject({ confirmationCount: 3 });
+    expect(prisma.incidentReport.count).not.toHaveBeenCalled();
   });
 });

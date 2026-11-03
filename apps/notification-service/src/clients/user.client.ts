@@ -12,14 +12,7 @@ export interface AlertRecipient {
   quietHoursEnd: number | null;
 }
 
-export interface NotificationPreferences {
-  pushEnabled: boolean;
-  incidentTypes: IncidentType[];
-  quietHoursStart: number | null;
-  quietHoursEnd: number | null;
-}
-
-/** Synchronous calls to user-service, which owns saved areas and preferences. */
+/** Synchronous calls to user-service, which owns saved areas and notification preferences. */
 @Injectable()
 export class UserClient {
   private readonly http: InternalHttpClient;
@@ -33,11 +26,5 @@ export class UserClient {
     correlationId: string,
   ): Promise<AlertRecipient[]> {
     return this.http.request('/internal/alert-recipients', { query, correlationId });
-  }
-
-  getPreferences(userId: string, correlationId: string): Promise<NotificationPreferences> {
-    return this.http.request(`/internal/users/${userId}/notification-preferences`, {
-      correlationId,
-    });
   }
 }

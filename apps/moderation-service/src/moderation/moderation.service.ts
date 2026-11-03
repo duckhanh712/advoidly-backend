@@ -19,8 +19,8 @@ import {
   RequestInfoDto,
 } from './dto/moderation.dto';
 
-/** Cases that still await a decision. */
-const UNDECIDED: ModerationCaseStatus[] = [
+/** Cases that still await a decision (the review queue). */
+export const UNDECIDED_STATUSES: ModerationCaseStatus[] = [
   ModerationCaseStatus.OPEN,
   ModerationCaseStatus.INFO_REQUESTED,
 ];
@@ -186,7 +186,7 @@ export class ModerationService {
     next: ModerationCaseStatus,
   ) {
     const { count } = await tx.moderationCase.updateMany({
-      where: { id, status: { in: UNDECIDED } },
+      where: { id, status: { in: UNDECIDED_STATUSES } },
       data: { status: next },
     });
     if (count === 0) {

@@ -25,6 +25,7 @@ export const PUBLIC_ROUTES: readonly { method: string; pattern: RegExp }[] = [
   { method: 'GET', pattern: /^\/api\/v1\/incidents\/?$/ },
   { method: 'GET', pattern: /^\/api\/v1\/incidents\/nearby\/?$/ },
   { method: 'GET', pattern: /^\/api\/v1\/incidents\/[0-9a-fA-F-]{36}\/?$/ },
+  { method: 'GET', pattern: /^\/api\/v1\/incidents\/[0-9a-fA-F-]{36}\/reports\/?$/ },
 ];
 
 export function matchRoute(path: string): ProxyRoute | undefined {

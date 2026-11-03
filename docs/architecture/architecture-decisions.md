@@ -212,3 +212,37 @@ carried in the event.
 
 **Consequences.** Auth-service never stores profile data, and user-service never sees password
 hashes. A profile is eventually consistent with registration, which the lazy creation covers.
+
+## ADR-014: Ending incidents from user reports
+
+**Context.** Floods and traffic jams often end within hours, and only moderators could resolve
+incidents. An incident that has ended kept showing on the "nearby" map until a moderator noticed,
+sending people around a road that is already clear. The people on the spot know first.
+
+**Decision.**
+- `POST /incidents/{id}/end-reports` records "this incident has ended", one report per user per
+  incident (unique `(incident_id, reporter_id)` in `incidents.incident_end_reports`). Any signed-in
+  user may report, including the original reporter. Only `VERIFIED` and `ACTIVE` incidents accept
+  reports.
+- The incident becomes `RESOLVED` at once when the report comes from:
+  1. the **original reporter**;
+  2. a **moderator or admin** (`IMMEDIATE_RESOLVE_ROLES`);
+  3. the **N-th distinct user**, where N = `INCIDENT_END_REPORTS_TO_RESOLVE` (default 3).
+  Otherwise the report is only counted (`endReportCount` on the incident detail).
+- Resolution goes through the normal lifecycle transition, so it records history with the reason,
+  publishes `incident.resolved` and clears the cache. The actor is the user whose report triggered it.
+- The lifecycle gains `VERIFIED → RESOLVED`, because many incidents end before anyone marks them
+  `ACTIVE`.
+- End reports live in their own table, separate from confirmations: someone who confirmed "still
+  flooded" must still be able to report "it has ended" later.
+
+**Consequences.**
+- Incidents can close without a moderator, which keeps the map current.
+- `RESOLVED` is terminal. N colluding or fake accounts can close a real incident, and there is no
+  reopen yet. Mitigations if abuse appears: raise N, count only reports from people near the
+  incident, require a minimum account age, or add a `RESOLVED → ACTIVE` reopen for moderators.
+- Two reports arriving together may both try to resolve. The second finds the incident already
+  `RESOLVED` and treats that as success.
+- When the reporter resolves their own incident, notification-service still sends them
+  `REPORT_RESOLVED` (it does not look at the actor yet).
+

@@ -11,26 +11,22 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiNoContentResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
-import { Authenticated, CorrelationId, CurrentUser, PaginatedResult } from '@app/common';
+import { Authenticated, CurrentUser, PaginatedResult } from '@app/common';
 import type { AuthenticatedUser } from '@app/contracts';
-import { UserClient } from '../clients/user.client';
 import {
   ListNotificationsQueryDto,
   NotificationDto,
-  NotificationPreferencesDto,
   ReadAllResultDto,
   RegisterDeviceDto,
 } from './dto/notification.dto';
 import { NotificationsService } from './notifications.service';
 
+/** Notification preferences are read and changed at /users/me/notification-preferences (user-service). */
 @ApiTags('notifications')
 @Authenticated()
 @Controller('notifications')
 export class NotificationsController {
-  constructor(
-    private readonly notifications: NotificationsService,
-    private readonly users: UserClient,
-  ) {}
+  constructor(private readonly notifications: NotificationsService) {}
 
   @Get()
   @ApiOkResponse({ type: [NotificationDto] })
@@ -54,16 +50,6 @@ export class NotificationsController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<NotificationDto> {
     return this.notifications.markRead(user.id, id);
-  }
-
-  /** Preferences are owned by user-service; this is a read-through convenience endpoint. */
-  @Get('preferences')
-  @ApiOkResponse({ type: NotificationPreferencesDto })
-  preferences(
-    @CurrentUser() user: AuthenticatedUser,
-    @CorrelationId() correlationId: string,
-  ): Promise<NotificationPreferencesDto> {
-    return this.users.getPreferences(user.id, correlationId);
   }
 
   @Post('devices')

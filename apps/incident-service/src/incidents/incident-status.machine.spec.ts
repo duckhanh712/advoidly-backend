@@ -15,6 +15,7 @@ describe('incident status machine', () => {
     [PENDING, VERIFIED],
     [PENDING, REJECTED],
     [VERIFIED, ACTIVE],
+    [VERIFIED, RESOLVED],
     [ACTIVE, RESOLVED],
   ];
 

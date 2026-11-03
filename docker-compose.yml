@@ -116,7 +116,47 @@ services:
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       DYNAMIC_CONFIG_ENABLED: 'true'
 
+  # S3-compatible object storage for incident photos and videos (local stand-in for AWS S3).
+  #   S3 API      http://localhost:${MINIO_PORT}
+  #   Web console http://localhost:${MINIO_CONSOLE_PORT}  (log in with MINIO_ROOT_USER / PASSWORD)
+  minio:
+    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2025-04-22T22-12-26Z}
+    restart: unless-stopped
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-urban_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-urban_minio_dev_password}
+      # Not used by MinIO itself; lets infra:verify check the bucket from inside the container.
+      MEDIA_BUCKET: ${MEDIA_BUCKET:-incident-media}
+    ports:
+      - '${MINIO_PORT:-9000}:9000'
+      - '${MINIO_CONSOLE_PORT:-9001}:9001'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      <<: *healthcheck
+      # The image ships the `mc` client but not curl.
+      test: ['CMD', 'mc', 'ready', 'local']
+
+  # One-shot job: creates the media bucket with public read access, then exits.
+  # Reuses the MinIO image because it already contains `mc`.
+  minio-init:
+    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2025-04-22T22-12-26Z}
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ['/bin/sh', '/scripts/create-bucket.sh']
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-urban_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-urban_minio_dev_password}
+      MEDIA_BUCKET: ${MEDIA_BUCKET:-incident-media}
+    volumes:
+      - ./infrastructure/minio/create-bucket.sh:/scripts/create-bucket.sh:ro
+    restart: 'no'
+
 volumes:
   postgres-data:
   redis-data:
   kafka-data:
+  minio-data:

@@ -139,12 +139,15 @@ results (1–200, default 50).
 | POST | `/incidents` | user | `{ type, title (5–150), description?, latitude, longitude, occurredAt? (≤ 7 days ago, not in the future), media?: [{ url (https), type: IMAGE\|VIDEO }] (max 5) }` → 201, status `PENDING` |
 | GET | `/incidents` | public | Paginated. Filters: `statuses`, `types` (comma-separated or repeated), `mine=true` (own reports, any status; needs auth), bounding box `minLat,minLng,maxLat,maxLng` (all four or none, each side ≤ 5°). Guests and users see only `VERIFIED`, `ACTIVE`, `RESOLVED`; moderators can filter any status. |
 | GET | `/incidents/nearby` | public | `latitude, longitude, radiusMeters (≤ 50000, default 2000), types?, limit?`. Closest first, with `distanceMeters`. Shows `VERIFIED`/`ACTIVE` (plus `PENDING` for moderators). |
-| GET | `/incidents/:id` | public | Detail with media. Non-public incidents return 404 unless the caller is the reporter or a moderator. Cached in Redis. |
+| GET | `/incidents/:id` | public | Detail with media, `confirmationCount` (accepted confirmations, excluding the original reporter) and `endReportCount` ("ended" reports). Non-public incidents return 404 unless the caller is the reporter or a moderator. Cached in Redis; the cache is cleared on every change and every new confirmation. |
 | PATCH | `/incidents/:id` | user | The reporter can edit `type`, `title`, `description` while `PENDING`. Moderators and admins can edit content and change `status` (with `reason`, which is required for `REJECTED`). |
 | GET | `/incidents/:id/history` | reporter / moderator | Audit trail |
+| POST | `/incidents/:id/reports` | user | Confirm an incident someone else reported: `{ description? (≤ 2000) }` → 201, report `ACCEPTED`. Only `VERIFIED`/`ACTIVE` incidents (else 409); one report per user per incident, so a second report or the original reporter gets 409; hidden incident → 404. |
+| POST | `/incidents/:id/end-reports` | user | "This incident has ended", no body → 201 `{ endReportCount, endReportsToResolve, status, resolvedBy }`. Only `VERIFIED`/`ACTIVE` (else 409), one per user (else 409). Resolves the incident at once when sent by the original reporter (`resolvedBy: REPORTER`), a moderator/admin (`STAFF`), or the N-th distinct user, N = `INCIDENT_END_REPORTS_TO_RESOLVE`, default 3 (`COMMUNITY`). See ADR-014. |
+| GET | `/incidents/:id/reports` | public | Confirmations, newest first, paginated (`page`, `limit`). Same visibility as the incident. Excludes the original report, so `meta.pagination.total` equals `confirmationCount`. Items: `{ id, description, createdAt, isMine }`; moderators and admins also get `reporterId`. |
 
-Incident lifecycle: `PENDING → VERIFIED → ACTIVE → RESOLVED`, and `PENDING → REJECTED`. Any other
-transition returns `409 INVALID_STATE_TRANSITION`.
+Incident lifecycle: `PENDING → VERIFIED → ACTIVE → RESOLVED`, `VERIFIED → RESOLVED`, and
+`PENDING → REJECTED`. Any other transition returns `409 INVALID_STATE_TRANSITION`.
 
 ### Moderation: `moderation-service` (MODERATOR or ADMIN only)
 
@@ -165,7 +168,6 @@ transition returns `409 INVALID_STATE_TRANSITION`.
 | GET | `/notifications` | user | Paginated, newest first. `unreadOnly=true` filter |
 | PATCH | `/notifications/read-all` | user | `{ updated }` |
 | PATCH | `/notifications/:id/read` | user | Marks one notification read |
-| GET | `/notifications/preferences` | user | Read-through to user-service (the owner) |
 | POST | `/notifications/devices` | user | `{ token, platform: ANDROID\|IOS\|WEB }` registers an FCM token → 204 |
 
 ### Internal endpoints (not exposed by the gateway)

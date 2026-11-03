@@ -105,7 +105,7 @@ infrastructure/
   scripts/verify-infra.sh infrastructure health/provisioning checks
 docs/                     architecture, API, database, events, development guides
 test/                     shared test utilities and integration test config
-docker-compose.yml        Postgres+PostGIS, Redis, Kafka (KRaft), kafka-init, Kafka UI
+docker-compose.yml        Postgres+PostGIS, Redis, Kafka (KRaft), kafka-init, Kafka UI, MinIO, minio-init
 ```
 
 ## Prerequisites
@@ -180,6 +180,7 @@ APP=incident-service yarn start:prod
 | Gateway readiness | http://localhost:3000/health |
 | Downstream status | http://localhost:3000/health/services |
 | Kafka UI | http://localhost:8080 |
+| MinIO console (incident media) | http://localhost:9001 (`MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` from `.env`) |
 
 ### Seed accounts (DEV ONLY)
 
@@ -228,8 +229,6 @@ These are deliberately out of scope for the foundation:
   signed-URL service yet.
 - **Token signing.** Access tokens use a shared HS256 secret. Moving to RS256 with JWKS would let
   services verify tokens without holding the signing key.
-- **Moderation case sync.** If a moderator or admin changes an incident's status directly with
-  `PATCH /incidents/:id`, the moderation case is not updated.
 - **Application containers.** `infrastructure/docker/Dockerfile` builds service images, but
   `docker-compose.yml` runs only the infrastructure.
 - **Production hardening.** Deployment, secrets management, TLS, Kafka authentication, and

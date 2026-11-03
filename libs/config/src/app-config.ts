@@ -22,7 +22,7 @@ export interface AppConfig {
   kafka: { brokers: string[]; clientId: string; consumerMaxRetries: number };
   services: Record<'auth' | 'user' | 'incident' | 'moderation' | 'notification', string>;
   rateLimit: { windowSeconds: number; maxRequests: number };
-  incident: { cacheTtlSeconds: number };
+  incident: { cacheTtlSeconds: number; endReportsToResolve: number };
   moderation: { duplicateRadiusMeters: number; duplicateWindowMinutes: number };
   fcm?: { projectId: string; clientEmail: string; privateKey: string };
 }
@@ -97,7 +97,10 @@ export function buildAppConfig(
       windowSeconds: env.RATE_LIMIT_WINDOW_SECONDS,
       maxRequests: env.RATE_LIMIT_MAX_REQUESTS,
     },
-    incident: { cacheTtlSeconds: env.INCIDENT_CACHE_TTL_SECONDS },
+    incident: {
+      cacheTtlSeconds: env.INCIDENT_CACHE_TTL_SECONDS,
+      endReportsToResolve: env.INCIDENT_END_REPORTS_TO_RESOLVE,
+    },
     moderation: {
       duplicateRadiusMeters: env.DUPLICATE_RADIUS_METERS,
       duplicateWindowMinutes: env.DUPLICATE_WINDOW_MINUTES,

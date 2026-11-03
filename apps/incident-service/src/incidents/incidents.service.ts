@@ -31,10 +31,11 @@ import {
   isModerator,
   resolveListStatuses,
 } from './incident-policy';
+import { confirmationsWhere } from '../incident-reports/confirmations';
+import { incidentCacheKey } from './incident-cache';
 import { assertTransition } from './incident-status.machine';
 import { IncidentsRepository, toIncidentDto } from './incidents.repository';
 
-const cacheKey = (id: string) => `incident:${id}`;
 const CONTENT_FIELDS = ['type', 'title', 'description'] as const;
 
 type IncidentEventType =
@@ -94,7 +95,14 @@ export class IncidentsService {
       include: { media: { select: { id: true, mediaUrl: true, mediaType: true } } },
     });
 
-    console.log('Incident created----------:', incident.id, 'by user:', user.id, 'correlationId:', correlationId);
+    console.log(
+      'Incident created----------:',
+      incident.id,
+      'by user:',
+      user.id,
+      'correlationId:',
+      correlationId,
+    );
 
     await this.publishSafely(EventTypes.INCIDENT_CREATED, snapshot(incident), correlationId);
     return toIncidentDto({
@@ -146,23 +154,39 @@ export class IncidentsService {
   }
 
   async findOne(id: string, user?: AuthenticatedUser): Promise<IncidentDto> {
-    let incident = await this.cache.getJson<IncidentDto>(cacheKey(id));
+    let incident = await this.cache.getJson<IncidentDto>(incidentCacheKey(id));
     if (!incident) {
       const row = await this.prisma.incident.findUnique({
         where: { id },
         include: { media: { select: { id: true, mediaUrl: true, mediaType: true } } },
       });
       if (!row) throw new ResourceNotFoundException('Incident', id);
-      incident = toIncidentDto({
-        ...row,
-        status: row.status as IncidentStatus,
-        type: row.type as IncidentType,
-      });
-      await this.cache.setJson(cacheKey(id), incident, this.config.incident.cacheTtlSeconds);
+      incident = {
+        ...toIncidentDto({
+          ...row,
+          status: row.status as IncidentStatus,
+          type: row.type as IncidentType,
+        }),
+        ...(await this.reportCounts(id, row.reporterId)),
+      };
+      // The cached copy is invalidated when the incident changes or gets a new confirmation or end report.
+      await this.cache.setJson(
+        incidentCacheKey(id),
+        incident,
+        this.config.incident.cacheTtlSeconds,
+      );
     }
     // Hidden incidents are reported as missing rather than forbidden, to avoid leaking ids.
     if (!canView(incident, user)) throw new ResourceNotFoundException('Incident', id);
     return incident;
+  }
+
+  private async reportCounts(id: string, reporterId: string) {
+    const [confirmationCount, endReportCount] = await Promise.all([
+      this.prisma.incidentReport.count({ where: confirmationsWhere(id, reporterId) }),
+      this.prisma.incidentEndReport.count({ where: { incidentId: id } }),
+    ]);
+    return { confirmationCount, endReportCount };
   }
 
   async history(id: string, user: AuthenticatedUser): Promise<IncidentHistoryDto[]> {
@@ -233,7 +257,7 @@ export class IncidentsService {
           },
         },
       });
-      await this.cache.delete(cacheKey(id));
+      await this.cache.delete(incidentCacheKey(id));
       await this.publishSafely(
         EventTypes.INCIDENT_UPDATED,
         { ...snapshot(updated), actorId: user.id, changedFields },
@@ -300,7 +324,7 @@ export class IncidentsService {
       return tx.incident.findUniqueOrThrow({ where: { id: incidentId } });
     });
 
-    await this.cache.delete(cacheKey(incidentId));
+    await this.cache.delete(incidentCacheKey(incidentId));
     const base = { ...snapshot(updated), previousStatus: from, actorId };
     switch (to) {
       case IncidentStatus.VERIFIED:

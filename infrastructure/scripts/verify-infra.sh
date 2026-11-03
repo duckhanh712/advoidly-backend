@@ -21,7 +21,7 @@ psql_exec() {
 }
 
 echo "Container health"
-for svc in postgres redis kafka; do
+for svc in postgres redis kafka minio; do
   check "$svc is healthy" bash -c "docker compose ps --format '{{.Health}}' $svc | grep -q healthy"
 done
 
@@ -33,6 +33,13 @@ done
 
 echo "Redis"
 check "PING" bash -c "docker compose exec -T redis redis-cli ping | grep -q PONG"
+
+echo "MinIO"
+minio_exec() {
+  docker compose exec -T minio sh -c 'mc alias set local http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" > /dev/null && '"$1"
+}
+check "media bucket exists" minio_exec 'mc ls "local/$MEDIA_BUCKET" > /dev/null'
+check "media bucket is publicly readable" minio_exec 'mc anonymous get "local/$MEDIA_BUCKET" | grep -qi download'
 
 echo "Kafka"
 topics=$(docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list 2>/dev/null)

@@ -106,6 +106,13 @@ export class EnvironmentVariables {
   @Min(0)
   INCIDENT_CACHE_TTL_SECONDS = 60;
 
+  /** Distinct users reporting "ended" that resolve an incident automatically (ADR-014). */
+  @Transform(toInt)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  INCIDENT_END_REPORTS_TO_RESOLVE = 3;
+
   @Transform(toInt)
   @IsInt()
   @Min(10)

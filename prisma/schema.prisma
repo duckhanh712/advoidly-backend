@@ -194,6 +194,7 @@ model Incident {
   createdAt   DateTime                              @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt   DateTime                              @updatedAt @map("updated_at") @db.Timestamptz(3)
   reports     IncidentReport[]
+  endReports  IncidentEndReport[]
   media       IncidentMedia[]
   history     IncidentHistory[]
 
@@ -204,7 +205,8 @@ model Incident {
   @@schema("incidents")
 }
 
-/// A user's report about an incident: the original report or a later confirmation/update.
+/// A user's report about an incident: the original report or a later confirmation/update
+/// (POST /incidents/{id}/reports).
 model IncidentReport {
   id          String               @id @default(uuid()) @db.Uuid
   incidentId  String               @map("incident_id") @db.Uuid
@@ -215,9 +217,25 @@ model IncidentReport {
   updatedAt   DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
   incident    Incident             @relation(fields: [incidentId], references: [id], onDelete: Cascade)
 
-  @@index([incidentId])
+  /// One report per user per incident: the original report or one later confirmation.
+  @@unique([incidentId, reporterId])
   @@index([reporterId])
   @@map("incident_reports")
+  @@schema("incidents")
+}
+
+/// A user saying "this incident has ended" (POST /incidents/{id}/end-reports). One per user per
+/// incident. The reporter, a moderator/admin, or enough distinct users resolve the incident
+/// (ADR-014).
+model IncidentEndReport {
+  id         String   @id @default(uuid()) @db.Uuid
+  incidentId String   @map("incident_id") @db.Uuid
+  reporterId String   @map("reporter_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@unique([incidentId, reporterId])
+  @@map("incident_end_reports")
   @@schema("incidents")
 }
 

@@ -31,10 +31,10 @@ Message headers: `event-id`, `event-type`, `correlation-id`. The message key is 
 | Event / topic | Producer | Consumers (group) | Key | Payload |
 |---|---|---|---|---|
 | `incident.created` | incident-service | moderation-service | incidentId | `IncidentSnapshot` |
-| `incident.verified` | incident-service | notification-service | incidentId | `IncidentSnapshot` + `previousStatus`, `actorId`, `reason?` |
+| `incident.verified` | incident-service | notification-service, moderation-service | incidentId | `IncidentSnapshot` + `previousStatus`, `actorId`, `reason?` |
 | `incident.updated` | incident-service | none yet | incidentId | `IncidentSnapshot` + `actorId`, `changedFields[]`, `previousStatus?` |
 | `incident.resolved` | incident-service | notification-service | incidentId | as `incident.verified` |
-| `incident.rejected` | incident-service | notification-service | incidentId | as `incident.verified`, with `reason` required |
+| `incident.rejected` | incident-service | notification-service, moderation-service | incidentId | as `incident.verified`, with `reason` required |
 | `notification.requested` | moderation-service (request-info) | notification-service | userId | `NotificationRequestedPayload` |
 | `user.registered` | auth-service | user-service | userId | `UserRegisteredPayload` |
 | `user.updated` | user-service | none yet | userId | `UserUpdatedPayload` |
@@ -71,7 +71,8 @@ interface UserUpdatedPayload   { userId: string; changedFields: string[]; displa
 | moderation-service | `incident.created` | Finds duplicate candidates (PostGIS) and opens a moderation case |
 | notification-service | `incident.verified` | Calls user-service for alert recipients. Stores `INCIDENT_NEARBY` for each matching user (except the reporter), with push suppressed during quiet hours, plus `REPORT_VERIFIED` for the reporter. Then sends pushes. |
 | notification-service | `incident.rejected` | `REPORT_REJECTED` to the reporter, with the reason |
-| notification-service | `incident.resolved` | `REPORT_RESOLVED` to the reporter |
+| moderation-service | `incident.verified`, `incident.rejected` | Closes the review case when the decision was made outside the moderation endpoints (e.g. an admin's `PATCH /incidents/:id`): sets it `APPROVED`/`REJECTED` and records the action with the event's `actorId` and `metadata.source = "incident-service"`. A case a moderator already decided is left as is. If the decision arrives before `incident.created`, the case is created already decided. |
+| notification-service | `incident.resolved` | `REPORT_RESOLVED` to the reporter (also when the incident was resolved by end reports, ADR-014) |
 | notification-service | `notification.requested` | Stores the notification and pushes it |
 
 ## Topics and consumer groups
